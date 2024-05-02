@@ -1,0 +1,31 @@
+// Define a unique ID for the bitmap
+#define IDB_LOGOBITMAP 101
+
+// Include the bitmap file
+IDB_LOGOBITMAP BITMAP "mpw.bmp"
+
+IDI_ICON1 ICON "mpw.ico"
+
+
+0 VERSIONINFO
+FILEVERSION 0,0,0,0
+PRODUCTVERSION 0,0,0,0
+FILEFLAGSMASK 0x3fL
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080704e4"
+        BEGIN
+            VALUE "CompanyName", "Informaticon AG"
+            VALUE "FileVersion", "0.0.0.0"
+            VALUE "InternalName", "MPW"
+            VALUE "OriginalFilename", "screensaver.scr"
+            VALUE "ProductName", "MPW"
+            VALUE "ProductVersion", "0.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x807, 1252
+    END
+END
