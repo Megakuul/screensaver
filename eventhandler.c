@@ -9,8 +9,13 @@
 LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
   // Get userdata (image state ptr) from the handle
   WindowState *windowState = (WindowState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+  if (!windowState) return DefWindowProc(hwnd, message, wParam, lParam);
+
+  // Static window counter used to check whether all windows are cleaned up
+  static int windowCount = 0;
   switch (message) {
     case WM_CREATE:
+      windowCount++;
       // Acquire unique lock
       AcquireSRWLockExclusive(&windowState->lock);
       // Retrieve cursor position when window is created
@@ -18,21 +23,26 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
       // Release unique lock
       ReleaseSRWLockExclusive(&windowState->lock);
       break;
+
     case WM_INVALIDATE_RECT:
       // Mark full window as dirty
       // This will trigger a repaint which itself will draw all images on the window at once
       InvalidateRect(hwnd, NULL, FALSE);
       break;
+
     case WM_PAINT:
       // Repaint the full window (includeing all images)
       RepaintWindow(hwnd, windowState);
       return FALSE;
+
     case WM_LBUTTONDOWN: // Left mouse click
     case WM_RBUTTONDOWN: // Right mouse click
     case WM_KEYDOWN: // Any key click // Any mouse movement
-      // Post WM_DESTROY message to this instance, this will let it finish its operations and then quit the application
-      PostMessage(hwnd, WM_DESTROY, 0, 0);
+      // Call the close operation of the window loop, this will async make the window loop close itself
+      // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
+      CallCloseWindowLoop(windowState);
       break;
+
     case WM_MOUSEMOVE:
       // Get cursor position
       POINT point;
@@ -47,16 +57,27 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
       int diffY = abs(point.y - windowState->initCursorPosition->y);
 
       if (diffX > windowState->cursorPositionThreshold || diffY > windowState->cursorPositionThreshold) {
-        // Post WM_DESTROY message to this instance, this will let it finish its operations and then quit the application
-        PostMessage(hwnd, WM_DESTROY, 0, 0);
-      }
-      // Release shared lock
-      ReleaseSRWLockShared(&windowState->lock);
+        // Unlock to prevent deadlock, as callCloseWindowLoop will enforce a unique lock
+        ReleaseSRWLockShared(&windowState->lock);
+        // Call the close operation of the window loop, this will async make the window loop close itself
+        // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
+        CallCloseWindowLoop(windowState);
+      } else ReleaseSRWLockShared(&windowState->lock);
       break;
-    case WM_DESTROY:
-      // Send WM_QUIT to quit message loop
-      // This will close the application and windows will deregister the SCREEN_SAVER_WINDOW_CLASS_LABEL class
-      PostQuitMessage(0); 
+    case WM_EXIT:
+      // Destroy window states associated window, this will trigger a WM_DESTROY
+      // initializing the destruction of the window, at the same time windowState stays in a valid state
+      // until it is fully cleaned up in WM_NCDESTROY
+      DestroyWindowStateWindow(windowState);
+      break;
+    case WM_NCDESTROY:
+      // Close window state which will release all resources
+      CloseWindowState(windowState);
+      // This is the last message a window receives, it is triggered through the DestroyWindow() (likely in CloseWindowState)
+      // The message will decrement the window count, if on 0 it calls PostQuitMessage to
+      if (--windowCount <= 0)
+        PostQuitMessage(0); 
+      break;
   }
 
   // Continue with default window procedure

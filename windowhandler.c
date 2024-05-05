@@ -2,9 +2,15 @@
 
 /**
  * Create window state
+ * 
+ * Set hWindow to NULL to create a window
+ * 
+ * This function must be called in the thread where you expect the WM_EXIT/WM_DESTROY messages in the eventloop,
+ * the reason for this is that windows "binds" the created window to the thread it was created in
 */
 WindowState* CreateWindowState(
   HINSTANCE hInstance,
+  HWND hWindow,
   int imageCount, 
   int movementSpeed,
   double interval,
@@ -32,21 +38,23 @@ WindowState* CreateWindowState(
   windowState->interval = interval;
   windowState->cursorPositionThreshold = cursorPositionThreshold;
   
-  windowState->hwnd = CreateWindowEx(
-    0,                                      // Extended window style
-    windowClass,                            // Window class name
-    L"",                                    // Window title
-    WS_POPUP | WS_VISIBLE,                  // Window style
-    monitorRect->left,                      // X position
-    monitorRect->top,                       // Y position
-    monitorRect->right - monitorRect->left, // Width
-    monitorRect->bottom - monitorRect->top, // Height
-    NULL,                                   // Parent window   
-    NULL,                                   // Menu
-    windowState->hInstance,                 // Instance handle
-    windowState    
-  );
-  if (!windowState->hwnd) return NULL;
+  if (hWindow==NULL) {
+    windowState->hwnd = CreateWindowEx(
+      0,                                      // Extended window style
+      windowClass,                            // Window class name
+      L"",                                    // Window title
+      WS_POPUP | WS_VISIBLE,                  // Window style
+      monitorRect->left,                      // X position
+      monitorRect->top,                       // Y position
+      monitorRect->right - monitorRect->left, // Width
+      monitorRect->bottom - monitorRect->top, // Height
+      NULL,                                   // Parent window   
+      NULL,                                   // Menu
+      windowState->hInstance,                 // Instance handle
+      NULL    
+    );
+    if (!windowState->hwnd) return NULL;
+  } else windowState->hwnd = hWindow;
 
   windowState->images = malloc(sizeof(ImageState*) * imageCount);
   if (!windowState->images) return NULL;
@@ -57,6 +65,8 @@ WindowState* CreateWindowState(
       CreateImageState(windowState->hInstance, movementSpeed, bounceIncrement, bounceDecrementScale, rcBitmapId);
   }
 
+  SetWindowLongPtr(windowState->hwnd, GWLP_USERDATA, (LONG_PTR)windowState);
+
   ShowWindow(windowState->hwnd, SW_SHOW);
   UpdateWindow(windowState->hwnd);
 
@@ -64,21 +74,33 @@ WindowState* CreateWindowState(
 }
 
 /**
- * Triggers a exit of the window process loop and cleanup of the window afterwards
-*/
-void CallCloseWindowLoop(WindowState* windowState) {
-  AcquireSRWLockExclusive(&windowState->lock);
-  windowState->exitBool = TRUE;
-  ReleaseSRWLockExclusive(&windowState->lock);
+ * Destroys windowState's associated Window
+ * 
+ * This effectively doesn't affect windowState but destroys the window leading to a WM_DESTROY message beeing sent
+ * 
+ * Useful to start the cleanup process of the window
+ * 
+ * This function must be called from the thread the windowState was created on!
+ */
+void DestroyWindowStateWindow(WindowState* windowState) {
+  if (windowState && windowState->hwnd) {
+    DestroyWindow(windowState->hwnd);
+    windowState->hwnd = NULL;
+  }
 }
 
 /**
- * Cleans up window state
+ * Cleans up window state and its associated resources
+ * 
+ * This function must be called from the thread the windowState was created on!
  */
 void CloseWindowState(WindowState* windowState) {
   if (windowState) {
     DeleteObject(windowState->backgroundBrush);
-    DestroyWindow(windowState->hwnd);
+    if (windowState->hwnd) {
+      DestroyWindow(windowState->hwnd);
+      windowState->hwnd = NULL;
+    }
     for (int i = 0; i < windowState->imageCount; i++) {
       CloseImageState(windowState->images[i]);
     }
@@ -129,7 +151,9 @@ ImageState* CreateImageState(
 }
 
 /**
- * Cleans up an image state
+ * Cleans up an image state and its associated resources
+ * 
+ * This function must be called from the thread the imageState was created on!
  */
 void CloseImageState(ImageState *state) {
   if (state) {
@@ -145,6 +169,9 @@ void CloseImageState(ImageState *state) {
  * When colliding with the handler window it will bounce of with a logarithmic-decreasing boost
 */
 void UpdateImagePosition(HWND hwnd, ImageState *state) {
+  // If handle is not valid anymore, skip it
+  if (!hwnd) return;
+  
   // Get client rect
   RECT clientRect;
   GetClientRect(hwnd, &clientRect);
@@ -186,9 +213,10 @@ void UpdateImagePosition(HWND hwnd, ImageState *state) {
 /**
  * Start window processor loop
  * 
- * This function can be run in a seperate thread.
+ * This function can be run in a seperate thread, the provided window state is synchronized with its lock member.
  * The provided void ptr must be a valid window state.
- * To close the loop and clean up the window
+ * 
+ * Messages are sent to the eventloop "listening" on the thread the WindowState was created!
 */
 DWORD WINAPI StartWindowLoop(LPVOID lpParam) {
   WindowState* windowState = (WindowState*)lpParam;
@@ -235,6 +263,16 @@ DWORD WINAPI StartWindowLoop(LPVOID lpParam) {
       Sleep(leftover);
     }
   }
-  CloseWindowState(windowState);
+  // Send an exit message to the eventloop
+  PostMessage(windowState->hwnd, WM_EXIT, 0, 0);
   return 0;
+}
+
+/**
+ * Triggers a exit of the window process loop which will close the loop and send a WM_EXIT message to the eventloop
+*/
+void CallCloseWindowLoop(WindowState* windowState) {
+  AcquireSRWLockExclusive(&windowState->lock);
+  windowState->exitBool = TRUE;
+  ReleaseSRWLockExclusive(&windowState->lock);
 }

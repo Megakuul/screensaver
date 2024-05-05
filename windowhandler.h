@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #define WM_INVALIDATE_RECT (WM_USER + 1)
+#define WM_EXIT (WM_USER + 2)
 
 /**
  * Represents a single images (bitmap) state
@@ -44,7 +45,9 @@ ImageState* CreateImageState(
   int rcBitmapId);
 
 /**
- * Cleans up an image state
+ * Cleans up an image state and its associated resources
+ * 
+ * This function must be called from the thread the imageState was created on!
  */
 void CloseImageState(ImageState *state);
 
@@ -55,7 +58,7 @@ typedef struct {
   // Lock for synchronisation on the window state
   SRWLOCK lock;
 
-  // Bool to indicate exiting the process loop and cleanup the state
+  // Bool to indicate exiting the process loop
   BOOL exitBool;
 
   // Interval the process loop iterates (in ms)
@@ -77,7 +80,8 @@ typedef struct {
   COLORREF transparentColor;
   // Color brush for background of the window
   HBRUSH backgroundBrush;
-  // Window handle
+  // Window handle of the associated window
+  // This handle is set to NULL upon destruction of the window to handle the destruction gracefully (not leading to undefined behavior)
   HWND hwnd;
   // Instance handle
   HINSTANCE hInstance;
@@ -85,9 +89,15 @@ typedef struct {
 
 /**
  * Create window state
+ * 
+ * Set hWindow to NULL to create a window
+ * 
+ * This function must be called in the thread where you expect the WM_EXIT/WM_DESTROY messages in the eventloop,
+ * the reason for this is that windows "binds" the created window to the thread it was created in
 */
 WindowState* CreateWindowState(
   HINSTANCE hInstance,
+  HWND hWindow,
   int imageCount, 
   int movementSpeed,
   double interval,
@@ -101,8 +111,22 @@ WindowState* CreateWindowState(
   COLORREF backgroundColor, 
   COLORREF transparentColor);
 
+
 /**
- * Cleans up window state
+ * Destroys windowState's associated Window
+ * 
+ * This effectively doesn't affect windowState but destroys the window leading to a WM_DESTROY message beeing sent
+ * 
+ * Useful to start the cleanup process of the window
+ * 
+ * This function must be called from the thread the windowState was created on!
+ */
+void DestroyWindowStateWindow(WindowState* windowState);
+
+/**
+ * Cleans up window state and its associated resources
+ * 
+ * This function must be called from the thread the windowState was created on!
  */
 void CloseWindowState(WindowState* windowState);
 
@@ -111,13 +135,11 @@ void CloseWindowState(WindowState* windowState);
  * 
  * This function can be run in a seperate thread, the provided window state is synchronized with its lock member.
  * The provided void ptr must be a valid window state.
- *  
- * The loop takes ownership of the window state and cleans it up after calling "CallCloseWindowLoop"
 */
 DWORD WINAPI StartWindowLoop(LPVOID lpParam);
 
 /**
- * Triggers a exit of the window process loop and cleanup of the window afterwards
+ * Triggers a exit of the window process loop which will close the loop and send a WM_EXIT message to the eventloop
  * 
  * This function can be run in a seperate thread, the provided window state is synchronized with its lock member.
 */

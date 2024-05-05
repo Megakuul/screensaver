@@ -31,47 +31,9 @@
 // Label used for the screen saver window class
 #define SCREEN_SAVER_WINDOW_CLASS_LABEL L"MPW_ScreenSaverWindow"
 
-/**
- * Callback called to create a window handle on the specified monitor
- * 
- * Creates a window handle and displays it on the screen
-*/
-BOOL CALLBACK CreateWindowProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
-
-  // Create a window for each monitor
-  HWND hwnd = CreateWindowEx(
-    0,                          // Extended window style
-    SCREEN_SAVER_WINDOW_CLASS_LABEL,  // Window class name -> Defined ScreenSaver canvas
-    L"",                        // Window title -> None
-    WS_POPUP | WS_VISIBLE,      // Window style
-    lprcMonitor->left,          // X position
-    lprcMonitor->top,           // Y position
-    lprcMonitor->right - lprcMonitor->left, // Width
-    lprcMonitor->bottom - lprcMonitor->top, // Height
-    NULL,                       // Parent window
-    NULL,                       // Menu
-    (HINSTANCE)dwData,          // Instance handle
-    NULL                        // Custom data -> ImageState pointer
-  );
-
-  // Load bitmap from embedded resource
-  ImageState* imageState = CreateImageState((HINSTANCE)dwData);
-  if (!imageState) return FALSE;
-
-  SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)imageState);
-
-  if (hwnd) {
-    // Show and update the window
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
-  }
-
-  return TRUE; // Continue enumeration
-}
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
   WNDCLASS wc = {0};
-  wc.lpfnWndProc = CoreEventLoop;
+  wc.lpfnWndProc = CallEventHandler;
   wc.hInstance = hInstance;
   wc.hCursor = LoadCursor(NULL, IDC_ARROW);
   wc.lpszClassName = SCREEN_SAVER_WINDOW_CLASS_LABEL;
