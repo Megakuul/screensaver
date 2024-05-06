@@ -23,7 +23,7 @@ typedef struct {
   // Current speed addition decrementor step
   int decSteps;
   // Base scaler to slow down decrementor
-  int baseDecScale;
+  double baseDecScale;
   // Bitmap metadata
   BITMAP bitmap;
   // Bitmap handler
@@ -41,7 +41,7 @@ ImageState* CreateImageState(
   HINSTANCE instance, 
   int movement, 
   int bounceIncrement, 
-  int bounceDecrementScale, 
+  double bounceDecrementScale, 
   int rcBitmapId);
 
 /**
@@ -102,7 +102,7 @@ WindowState* CreateWindowState(
   int movementSpeed,
   double interval,
   int bounceIncrement,
-  int bounceDecrementScale,
+  double bounceDecrementScale,
   wchar_t* windowClass, 
   LPRECT monitorRect, 
   LPPOINT initCursorPos, 
