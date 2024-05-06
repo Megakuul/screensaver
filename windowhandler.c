@@ -15,7 +15,7 @@ WindowState* CreateWindowState(
   int movementSpeed,
   double interval,
   int bounceIncrement,
-  int bounceDecrementScale,
+  double bounceDecrementScale,
   wchar_t* windowClass, 
   LPRECT monitorRect, 
   LPPOINT initCursorPos, 
@@ -67,6 +67,9 @@ WindowState* CreateWindowState(
 
   SetWindowLongPtr(windowState->hwnd, GWLP_USERDATA, (LONG_PTR)windowState);
 
+  // Start initialization of the window
+  PostMessage(windowState->hwnd, WM_INITSTATE, 0, 0);
+
   ShowWindow(windowState->hwnd, SW_SHOW);
   UpdateWindow(windowState->hwnd);
 
@@ -84,8 +87,9 @@ WindowState* CreateWindowState(
  */
 void DestroyWindowStateWindow(WindowState* windowState) {
   if (windowState && windowState->hwnd) {
-    DestroyWindow(windowState->hwnd);
+    HWND hwnd = windowState->hwnd;
     windowState->hwnd = NULL;
+    DestroyWindow(hwnd);
   }
 }
 
@@ -98,8 +102,9 @@ void CloseWindowState(WindowState* windowState) {
   if (windowState) {
     DeleteObject(windowState->backgroundBrush);
     if (windowState->hwnd) {
-      DestroyWindow(windowState->hwnd);
+      HWND hwnd = windowState->hwnd;
       windowState->hwnd = NULL;
+      DestroyWindow(hwnd);
     }
     for (int i = 0; i < windowState->imageCount; i++) {
       CloseImageState(windowState->images[i]);
@@ -118,7 +123,7 @@ ImageState* CreateImageState(
   HINSTANCE instance, 
   int movement, 
   int bounceIncrement, 
-  int bounceDecrementScale, 
+  double bounceDecrementScale, 
   int rcBitmapId) {
   HBITMAP bitmapHandler = LoadBitmap((HINSTANCE)instance, MAKEINTRESOURCE(rcBitmapId));
   if (!bitmapHandler) return NULL;

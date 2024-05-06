@@ -32,7 +32,7 @@ typedef struct {
   */
   int count;
   /**
-   * Default update interval. This value should be set to the displays refresh rate optimally
+   * Default update interval in ms. This value should be set to 1000 / the displays refresh rate for optimal movement
   */
   int interval;
   /**
@@ -112,13 +112,13 @@ BOOL CALLBACK CreateMonitorWindow(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
   // Fetch monitor info data
   MONITORINFOEX mi;
   mi.cbSize = sizeof(MONITORINFOEX);
-  if (GetMonitorInfo(hMonitor, &mi)) {
+  if (GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) {
     // Fetch displayFrequency from the monitor info data
     DEVMODE dm;
     dm.dmSize = sizeof(DEVMODE);
     if (EnumDisplaySettings(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm)) {
       // Set interval to the display frequency to synchronize frames with movement updates
-      request->interval = dm.dmDisplayFrequency;
+      request->interval = 1000 / dm.dmDisplayFrequency;
     }
   };
 
@@ -179,7 +179,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     .initCursorPos = &initCursorPos,
     .cursorThreshold = 20,
     .count = 3,
-    .interval = 60,
+    .interval = 1000 / 60, // Default to 60hz
     .speed = 2,
     .bounce = 20,
     .bounceScale = 0.7,

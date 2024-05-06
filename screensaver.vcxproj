@@ -21,8 +21,9 @@
 
   <ItemGroup>
     <ClCompile Include="main.c" />
-    <ClCompile Include="eventloop.c" />
-    <ClCompile Include="eventloop.c" />
+    <ClCompile Include="parser.c" />
+    <ClCompile Include="eventhandler.c" />
+    <ClCompile Include="windowhandler.c" />
   </ItemGroup>
 
   <ItemGroup>

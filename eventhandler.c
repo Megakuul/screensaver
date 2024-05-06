@@ -1,88 +1,10 @@
 #include "eventhandler.h"
 
-/**
- * Callback called from the message queue if an event is triggered
- * 
- * Middlewares specified messages 
- * (e.g. to exit the programm on keypress) and gives control back to the default window procedure
-*/
-LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
-  // Get userdata (image state ptr) from the handle
-  WindowState *windowState = (WindowState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
-  if (!windowState) return DefWindowProc(hwnd, message, wParam, lParam);
-
-  // Static window counter used to check whether all windows are cleaned up
-  static int windowCount = 0;
-  switch (message) {
-    case WM_CREATE:
-      windowCount++;
-      // Acquire unique lock
-      AcquireSRWLockExclusive(&windowState->lock);
-      // Retrieve cursor position when window is created
-      GetCursorPos(&windowState->initCursorPosition);
-      // Release unique lock
-      ReleaseSRWLockExclusive(&windowState->lock);
-      break;
-
-    case WM_INVALIDATE_RECT:
-      // Mark full window as dirty
-      // This will trigger a repaint which itself will draw all images on the window at once
-      InvalidateRect(hwnd, NULL, FALSE);
-      break;
-
-    case WM_PAINT:
-      // Repaint the full window (includeing all images)
-      RepaintWindow(hwnd, windowState);
-      return FALSE;
-
-    case WM_LBUTTONDOWN: // Left mouse click
-    case WM_RBUTTONDOWN: // Right mouse click
-    case WM_KEYDOWN: // Any key click // Any mouse movement
-      // Call the close operation of the window loop, this will async make the window loop close itself
-      // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
-      CallCloseWindowLoop(windowState);
-      break;
-
-    case WM_MOUSEMOVE:
-      // Get cursor position
-      POINT point;
-      if (!GetCursorPos(&point))
-        break;
-      
-      // Acquire shared lock
-      AcquireSRWLockShared(&windowState->lock);
-
-      // Get difference between the current point and the last buffered point
-      int diffX = abs(point.x - windowState->initCursorPosition->x);
-      int diffY = abs(point.y - windowState->initCursorPosition->y);
-
-      if (diffX > windowState->cursorPositionThreshold || diffY > windowState->cursorPositionThreshold) {
-        // Unlock to prevent deadlock, as callCloseWindowLoop will enforce a unique lock
-        ReleaseSRWLockShared(&windowState->lock);
-        // Call the close operation of the window loop, this will async make the window loop close itself
-        // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
-        CallCloseWindowLoop(windowState);
-      } else ReleaseSRWLockShared(&windowState->lock);
-      break;
-    case WM_EXIT:
-      // Destroy window states associated window, this will trigger a WM_DESTROY
-      // initializing the destruction of the window, at the same time windowState stays in a valid state
-      // until it is fully cleaned up in WM_NCDESTROY
-      DestroyWindowStateWindow(windowState);
-      break;
-    case WM_NCDESTROY:
-      // Close window state which will release all resources
-      CloseWindowState(windowState);
-      // This is the last message a window receives, it is triggered through the DestroyWindow() (likely in CloseWindowState)
-      // The message will decrement the window count, if on 0 it calls PostQuitMessage to
-      if (--windowCount <= 0)
-        PostQuitMessage(0); 
-      break;
-  }
-
-  // Continue with default window procedure
-  return DefWindowProc(hwnd, message, wParam, lParam);
-}
+// Size of the static preallocated array used to track windows in the event loop
+// The array holds 8bit ptrs, which means 64 bytes are used on the stack
+// this will likely never be a problem on a system using a screensaver (windows default stack size is 1MB).
+// If the app for whatever reason has more then 64 windows (aka 64 monitors) this value can be increased
+#define MAX_WINDOWS_PER_EVENTLOOP 64
 
 /**
  * Repaint the full window based on the window state
@@ -134,4 +56,109 @@ void RepaintWindow(HWND hwnd, WindowState *windowState) {
   DeleteObject(memDC);
 
   EndPaint(hwnd, &ps);
+}
+
+/**
+ * Callback called from the message queue if an event is triggered
+ * 
+ * Middlewares specified messages 
+ * (e.g. to exit the programm on keypress) and gives control back to the default window procedure
+*/
+LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+  // Get userdata (image state ptr) from the handle
+  WindowState *windowState = (WindowState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+  if (!windowState) return DefWindowProc(hwnd, message, wParam, lParam);
+
+  // Static windowStateStack + Counter, tracking all active windows.
+  // Tracking is performed on the stack for simplicity, 
+  // as it is extremely unlikely that dynamic allocation will be necessary in the future.
+  // In this context, each window consistently corresponds to one monitor in a screensaver application.
+  static int windowStateStackCount = 0;
+  // Array is essentially a stack, holding all windowStates
+  // When calling CallCloseWindowLoop() on a windowState the entry should be set to NULL
+  static WindowState* windowStateStack[MAX_WINDOWS_PER_EVENTLOOP];
+  switch (message) {
+    case WM_INITSTATE:
+      // Add the state to the windowStateStack and increment the count
+      windowStateStack[windowStateStackCount++] = windowState;
+      // Acquire unique lock
+      AcquireSRWLockExclusive(&windowState->lock);
+      // Retrieve cursor position when window is created
+      GetCursorPos(windowState->initCursorPosition);
+      // Release unique lock
+      ReleaseSRWLockExclusive(&windowState->lock);
+      
+      break;
+
+    case WM_INVALIDATE_RECT:
+      // Mark full window as dirty
+      // This will trigger a repaint which itself will draw all images on the window at once
+      InvalidateRect(hwnd, NULL, FALSE);
+      break;
+
+    case WM_PAINT:
+      // Repaint the full window (includeing all images)
+      RepaintWindow(hwnd, windowState);
+      return FALSE;
+
+    case WM_LBUTTONDOWN: // Left mouse click
+    case WM_RBUTTONDOWN: // Right mouse click
+    case WM_KEYDOWN: // Any key click // Any mouse movement
+      // Iterate over all windowStates and close them up
+      for (int i = 0; i < windowStateStackCount; i++) {
+        if (windowStateStack[i]) {
+          // Call the close operation of the window loop, this will async make the window loop close itself
+          // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
+          CallCloseWindowLoop(windowStateStack[i]);
+          windowStateStack[i] = NULL;
+        }
+      }
+      break;
+
+    case WM_MOUSEMOVE:
+      // Get cursor position
+      POINT point;
+      if (!GetCursorPos(&point))
+        break;
+      
+      // Acquire shared lock
+      AcquireSRWLockShared(&windowState->lock);
+
+      // Get difference between the current point and the last buffered point
+      int diffX = abs(point.x - windowState->initCursorPosition->x);
+      int diffY = abs(point.y - windowState->initCursorPosition->y);
+
+      if (diffX > windowState->cursorPositionThreshold || diffY > windowState->cursorPositionThreshold) {
+        // Unlock to prevent deadlock, as callCloseWindowLoop will enforce a unique lock
+        ReleaseSRWLockShared(&windowState->lock);
+        // Iterate over all windowStates and close them up
+        for (int i = 0; i < windowStateStackCount; i++) {
+          if (windowStateStack[i]) {
+            // Call the close operation of the window loop, this will async make the window loop close itself
+            // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
+            CallCloseWindowLoop(windowStateStack[i]);
+            windowStateStack[i] = NULL;
+          }
+        }
+      } else ReleaseSRWLockShared(&windowState->lock);
+      break;
+    case WM_EXIT:
+      // Destroy window states associated window, this will trigger a WM_DESTROY
+      // initializing the destruction of the window, at the same time windowState stays in a valid state
+      // until it is fully cleaned up in WM_NCDESTROY
+      DestroyWindowStateWindow(windowState);
+      break;
+    case WM_NCDESTROY:
+      // Close window state which will release all resources
+      CloseWindowState(windowState);
+      // This is the last message a window receives, it is triggered through the DestroyWindow() (likely in CloseWindowState)
+      // The message will decrement the window count, if on 0 it calls PostQuitMessage to
+      if (--windowStateStackCount <= 0) {
+        PostQuitMessage(0); 
+      }
+      break;
+  }
+
+  // Continue with default window procedure
+  return DefWindowProc(hwnd, message, wParam, lParam);
 }

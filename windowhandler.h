@@ -3,8 +3,9 @@
 
 #include <windows.h>
 
-#define WM_INVALIDATE_RECT (WM_USER + 1)
-#define WM_EXIT (WM_USER + 2)
+#define WM_INITSTATE (WM_USER + 1)
+#define WM_INVALIDATE_RECT (WM_USER + 2)
+#define WM_EXIT (WM_USER + 3)
 
 /**
  * Represents a single images (bitmap) state
