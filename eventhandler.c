@@ -67,18 +67,30 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
   WindowState *windowState = (WindowState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
   if (!windowState) return DefWindowProc(hwnd, message, wParam, lParam);
 
-  // Static windowStateStack + Counter, tracking all active windows.
+  // Static windowStateStack + Length + Counter, tracking all active windows.
   // Tracking is performed on the stack for simplicity, 
   // as it is extremely unlikely that dynamic allocation will be necessary in the future.
   // In this context, each window consistently corresponds to one monitor in a screensaver application.
-  static int windowStateStackCount = 0;
-  // Array is essentially a stack, holding all windowStates
-  // When calling CallCloseWindowLoop() on a windowState the entry should be set to NULL
+
+  // Static windowStateCount, counting window states.
+  // If the counter hits 0 it will trigger the eventloop to exit
+  static int windowStateCount = 0;
+
+  // Static windowStateStackLength, exact length of the windowStateStack
+  static int windowStateStackLength = 0;
+  // Static one shot stack holding all window states
+  // When removing elements from the windowStateStack, ALL elements must be removed at once
+  // and the windowStateStackLength must be set to 0. Removing single elements and then adding more elements
+  // will lead to undefined behavior.
   static WindowState* windowStateStack[MAX_WINDOWS_PER_EVENTLOOP];
+
   switch (message) {
     case WM_INITSTATE:
-      // Add the state to the windowStateStack and increment the count
-      windowStateStack[windowStateStackCount++] = windowState;
+      // Add the state to the windowStateStack
+      windowStateStack[windowStateStackLength++] = windowState;
+      // Increment windowState count
+      windowStateCount++;
+
       // Acquire unique lock
       AcquireSRWLockExclusive(&windowState->initCursorPositionLock);
       // Retrieve cursor position when window is created
@@ -103,14 +115,13 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
     case WM_RBUTTONDOWN: // Right mouse click
     case WM_KEYDOWN: // Any key click // Any mouse movement
       // Iterate over all windowStates and close them up
-      for (int i = 0; i < windowStateStackCount; i++) {
-        if (windowStateStack[i]) {
-          // Call the close operation of the window loop, this will async make the window loop close itself
-          // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
-          CallCloseWindowLoop(windowStateStack[i]);
-          windowStateStack[i] = NULL;
-        }
+      for (int i = 0; i < windowStateStackLength; i++) {
+        // Call the close operation of the window loop, this will async make the window loop close itself
+        // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
+        CallCloseWindowLoop(windowStateStack[i]);
       }
+      // Clear one shot stack after closing the windowStates by setting the length to 0
+      windowStateStackLength = 0;
       break;
 
     case WM_MOUSEMOVE:
@@ -131,14 +142,13 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 
       if (diffX > windowState->cursorPositionThreshold || diffY > windowState->cursorPositionThreshold) {
         // Iterate over all windowStates and close them up
-        for (int i = 0; i < windowStateStackCount; i++) {
-          if (windowStateStack[i]) {
-            // Call the close operation of the window loop, this will async make the window loop close itself
-            // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
-            CallCloseWindowLoop(windowStateStack[i]);
-            windowStateStack[i] = NULL;
-          }
+        for (int i = 0; i < windowStateStackLength; i++) {
+          // Call the close operation of the window loop, this will async make the window loop close itself
+          // After closing itself, the window loop posts a WM_EXIT message which initiates the cleanup of the Window
+          CallCloseWindowLoop(windowStateStack[i]);
         }
+        // Clear one shot stack after closing the windowStates by setting the length to 0
+        windowStateStackLength = 0;
       }
       break;
     case WM_EXIT:
@@ -152,7 +162,7 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
       CloseWindowState(windowState);
       // This is the last message a window receives, it is triggered through the DestroyWindow() (likely in CloseWindowState)
       // The message will decrement the window count, if on 0 it calls PostQuitMessage to
-      if (--windowStateStackCount <= 0) {
+      if (--windowStateCount <= 0) {
         PostQuitMessage(0); 
       }
       break;

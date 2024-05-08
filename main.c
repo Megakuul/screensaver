@@ -112,8 +112,7 @@ BOOL CALLBACK CreateMonitorWindow(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
   // Fetch monitor info data
   MONITORINFOEX mi;
   mi.cbSize = sizeof(MONITORINFOEX);
-  // TODO: Remove !
-  if (!GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) {
+  if (GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) {
     // Fetch displayFrequency from the monitor info data
     DEVMODE dm;
     dm.dmSize = sizeof(DEVMODE);
@@ -181,7 +180,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     .cursorThreshold = 20,
     .count = 3,
     .interval = 1000 / 60, // Default to 60hz
-    .speed = 2,
+    .speed = 1,
     .bounce = 20,
     .bounceScale = 0.7,
     .bitmap = 101,

@@ -252,13 +252,6 @@ DWORD WINAPI StartWindowLoop(LPVOID lpParam) {
 
     // Acquire ticks since system start
     QueryPerformanceCounter(&now);
-    // Calculate tick difference between now and the start buffer and convert it to seconds by dividing by frequency
-    elapsed = (double)(now.QuadPart - start.QuadPart) / freq.QuadPart;
-
-    // If interval has already elapsed, reset start buffer
-    if (elapsed >= windowState->interval) {
-      QueryPerformanceCounter(&start);
-    }
 
     // Rerender and calculate the position of all images on the window
     for (int i = 0; i < windowState->imageCount; i++) {
@@ -267,13 +260,24 @@ DWORD WINAPI StartWindowLoop(LPVOID lpParam) {
 
     // PostMessage is calling the Windows UI system message queue and is thread-safe
     PostMessage(windowState->hwnd, WM_INVALIDATE_RECT, 0, 0);
+    
+    // Calculate tick difference between now and the start buffer and convert it to seconds by dividing by frequency
+    elapsed = ((double)(now.QuadPart - start.QuadPart) / freq.QuadPart) * 1000;
 
-    double leftover = windowState->interval - elapsed;
-
-    // If leftover is under 0.002 omit the Sleep syscall as this will take more time then is leftover
-    if (leftover > 0.002) {
-      Sleep(leftover);
+    // The windows Sleep() syscall is extremly unprecise and can cause weird behavior, like rounding down / ignoring 
+    // low intervals (like <20ms). Therefore we use a busy-spinner here, which essentially spins an empty loop
+    // until the time elapsed. In order to not fully starve the cpu, we use a Sleep(0) yielding control to the kernel, which can 
+    // then send this thread sleeping for 1 tick if there are other busy or more important threads.
+    while(elapsed < windowState->interval) {
+      // Yield control to kernel for 0-1 ticks
+      Sleep(0);
+      // Take elapsed snapshot for comparison
+      QueryPerformanceCounter(&now);
+      elapsed = ((double)(now.QuadPart - start.QuadPart) / freq.QuadPart) * 1000;
     }
+
+    // Reset start counter
+    QueryPerformanceCounter(&start);
   }
   // Send an exit message to the eventloop
   PostMessage(windowState->hwnd, WM_EXIT, 0, 0);
