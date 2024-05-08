@@ -112,7 +112,8 @@ BOOL CALLBACK CreateMonitorWindow(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
   // Fetch monitor info data
   MONITORINFOEX mi;
   mi.cbSize = sizeof(MONITORINFOEX);
-  if (GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) {
+  // TODO: Remove !
+  if (!GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) {
     // Fetch displayFrequency from the monitor info data
     DEVMODE dm;
     dm.dmSize = sizeof(DEVMODE);

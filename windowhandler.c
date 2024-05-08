@@ -30,8 +30,8 @@ WindowState* CreateWindowState(
   windowState->hInstance = hInstance;
   windowState->windowClass = windowClass;
   windowState->initCursorPosition = initCursorPos;
+  InitializeSRWLock(&windowState->initCursorPositionLock);
   windowState->exitBool = FALSE;
-  InitializeSRWLock(&windowState->lock);
 
   windowState->backgroundBrush = CreateSolidBrush(backgroundColor);
   windowState->transparentColor = transparentColor;
@@ -141,6 +141,7 @@ ImageState* CreateImageState(
   imageState->decSteps = 1;
   imageState->baseInc = bounceIncrement;
   imageState->baseDecScale = bounceDecrementScale;
+  InitializeSRWLock(&imageState->lock);
 
   imageState->bitmap = (BITMAP){0};
 
@@ -160,11 +161,11 @@ ImageState* CreateImageState(
  * 
  * This function must be called from the thread the imageState was created on!
  */
-void CloseImageState(ImageState *state) {
-  if (state) {
-    DeleteObject(state->bitmapHandler);
-    DeleteDC(state->bitmapHdc);
-    free(state);
+void CloseImageState(ImageState *imageState) {
+  if (imageState) {
+    DeleteObject(imageState->bitmapHandler);
+    DeleteDC(imageState->bitmapHdc);
+    free(imageState);
   }
 }
 
@@ -172,8 +173,10 @@ void CloseImageState(ImageState *state) {
  * Updates the position of the provided image state
  * 
  * When colliding with the handler window it will bounce of with a logarithmic-decreasing boost
+ * 
+ * This function is synchronizing updates to mutable components of the image state with a unique lock
 */
-void UpdateImagePosition(HWND hwnd, ImageState *state) {
+void UpdateImagePosition(HWND hwnd, ImageState *imageState) {
   // If handle is not valid anymore, skip it
   if (!hwnd) return;
   
@@ -181,38 +184,44 @@ void UpdateImagePosition(HWND hwnd, ImageState *state) {
   RECT clientRect;
   GetClientRect(hwnd, &clientRect);
 
-  if (state->inc>0) {
+  // Acquire unique lock
+  AcquireSRWLockExclusive(&imageState->lock);
+
+  if (imageState->inc>0) {
     // Decrement incrementor with a logarithmic decrementation
     // Logarithm the difference between log(a) and log(a+1) gets smaller when a is getting larger
     // therefore its quite good to create a smooth animation, because if a (aka decStep) is small
     // it won't decrement much from inc
-    state->inc *= state->baseDecScale * (log(state->decSteps + 1) / log(state->decSteps + 2));
+    imageState->inc *= imageState->baseDecScale * (log(imageState->decSteps + 1) / log(imageState->decSteps + 2));
     // Decrement decrement steps
-    state->decSteps++;
+    imageState->decSteps++;
     // Check boundaries
-    state->inc = state->inc<=0 ? 0 : state->inc;
+    imageState->inc = imageState->inc<=0 ? 0 : imageState->inc;
   }
 
   // Convert the incrementors operator in the operator of the current move state
-  int xInc = (state->xMov >= 0) ? state->inc : -state->inc;
-  int yInc = (state->yMov >= 0) ? state->inc : -state->inc;
+  int xInc = (imageState->xMov >= 0) ? imageState->inc : -imageState->inc;
+  int yInc = (imageState->yMov >= 0) ? imageState->inc : -imageState->inc;
 
   // Move image
-  state->xPos += state->xMov + xInc;
-  state->yPos += state->yMov + yInc;
+  imageState->xPos += imageState->xMov + xInc;
+  imageState->yPos += imageState->yMov + yInc;
 
   // Check if position in bound, if not movement is inverted
-  if (state->xPos + state->bitmap.bmWidth > clientRect.right || state->xPos < clientRect.left) {
-    state->inc = state->baseInc;
-    state->decSteps = 1;
-    state->xMov = - state->xMov;
+  if (imageState->xPos + imageState->bitmap.bmWidth > clientRect.right || imageState->xPos < clientRect.left) {
+    imageState->inc = imageState->baseInc;
+    imageState->decSteps = 1;
+    imageState->xMov = - imageState->xMov;
   }
   // Check if position in bound, if not movement is inverted
-  if (state->yPos + state->bitmap.bmHeight > clientRect.bottom || state->yPos < clientRect.top) {
-    state->inc = state->baseInc;
-    state->decSteps = 1;
-    state->yMov = - state->yMov;
+  if (imageState->yPos + imageState->bitmap.bmHeight > clientRect.bottom || imageState->yPos < clientRect.top) {
+    imageState->inc = imageState->baseInc;
+    imageState->decSteps = 1;
+    imageState->yMov = - imageState->yMov;
   }
+
+  // Release unique lock
+  ReleaseSRWLockExclusive(&imageState->lock);
 }
 
 /**
@@ -228,40 +237,38 @@ DWORD WINAPI StartWindowLoop(LPVOID lpParam) {
 
   // Initialize parameters used for the high precision timer
   LARGE_INTEGER start, freq, now;
+  // Acquire frequency (ticks per second) 
   QueryPerformanceFrequency(&freq);
+  // Acquire ticks since system start
   QueryPerformanceCounter(&start);
 
   double elapsed = 0.0;
  
   while (TRUE) {
-    // Acquire unique lock
-    AcquireSRWLockExclusive(&windowState->lock);
     // Run loop until exitBool is set
-    if (windowState->exitBool) {
-      ReleaseSRWLockExclusive(&windowState->lock);
+    if (InterlockedCompareExchange(&windowState->exitBool, FALSE, FALSE)) {
       break;
     }
 
+    // Acquire ticks since system start
     QueryPerformanceCounter(&now);
+    // Calculate tick difference between now and the start buffer and convert it to seconds by dividing by frequency
     elapsed = (double)(now.QuadPart - start.QuadPart) / freq.QuadPart;
 
+    // If interval has already elapsed, reset start buffer
     if (elapsed >= windowState->interval) {
       QueryPerformanceCounter(&start);
-
-      if (elapsed > windowState->interval)
-        start.QuadPart -= (LONGLONG)((elapsed - windowState->interval) * freq.QuadPart);
     }
 
     // Rerender and calculate the position of all images on the window
     for (int i = 0; i < windowState->imageCount; i++) {
       UpdateImagePosition(windowState->hwnd, windowState->images[i]);
     }
+
     // PostMessage is calling the Windows UI system message queue and is thread-safe
     PostMessage(windowState->hwnd, WM_INVALIDATE_RECT, 0, 0);
 
     double leftover = windowState->interval - elapsed;
-    // Release unique lock
-    ReleaseSRWLockExclusive(&windowState->lock);
 
     // If leftover is under 0.002 omit the Sleep syscall as this will take more time then is leftover
     if (leftover > 0.002) {
@@ -275,9 +282,9 @@ DWORD WINAPI StartWindowLoop(LPVOID lpParam) {
 
 /**
  * Triggers a exit of the window process loop which will close the loop and send a WM_EXIT message to the eventloop
+ * 
+ * Operation sets exitBool to true but doesn't guarantee 
 */
 void CallCloseWindowLoop(WindowState* windowState) {
-  AcquireSRWLockExclusive(&windowState->lock);
-  windowState->exitBool = TRUE;
-  ReleaseSRWLockExclusive(&windowState->lock);
+  InterlockedExchange(&windowState->exitBool, TRUE);
 }

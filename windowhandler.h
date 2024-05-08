@@ -11,6 +11,8 @@
  * Represents a single images (bitmap) state
 */
 typedef struct {
+  // Mutex lock to synchronize access to the image state
+  SRWLOCK lock;
   // Position of the image
   int xPos;
   int yPos;
@@ -56,11 +58,8 @@ void CloseImageState(ImageState *state);
  * Represents one window state
 */
 typedef struct {
-  // Lock for synchronisation on the window state
-  SRWLOCK lock;
-
   // Bool to indicate exiting the process loop
-  BOOL exitBool;
+  volatile LONG exitBool;
 
   // Interval the process loop iterates (in ms)
   double interval;
@@ -72,6 +71,8 @@ typedef struct {
 
   // Reference pointer to initial cursor position, not managed by the struct
   LPPOINT initCursorPosition;
+  // Lock for synchronisation on initCursorPosition
+  SRWLOCK initCursorPositionLock;
   // Threshold for the cursor position relative to initCursorPosition until a WM_DESTROY message is sent
   int cursorPositionThreshold;
 

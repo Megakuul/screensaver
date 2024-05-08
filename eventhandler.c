@@ -19,9 +19,6 @@ void RepaintWindow(HWND hwnd, WindowState *windowState) {
   HBITMAP memBitmap = CreateCompatibleBitmap(hdc, ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top);
   HBITMAP oldmap = SelectObject(memDC, memBitmap);
 
-  // Acquire shared lock
-  AcquireSRWLockShared(&windowState->lock);
-
   // Fill memory paint handler device with the background brush
   // When erasing the rect this color is removed, therefore we need to fill the whole rcPaint now
   FillRect(memDC, &ps.rcPaint, windowState->backgroundBrush);
@@ -29,6 +26,8 @@ void RepaintWindow(HWND hwnd, WindowState *windowState) {
   // Process all images on the window and draw them to the memDC
   for (int i = 0; i < windowState->imageCount; i++) {
     ImageState* imageState = windowState->images[i];
+    // Acquire shared lock to image state
+    AcquireSRWLockShared(&imageState->lock);
     // Move the bitmap to the memDC (removing transparent color)
     // Draw the bitmap to the rcPaint rect canvas (boundary is set by subtracting left / top of the rcPaint from xPos / yPos)
     // Here we essentially draw the bitmap (state->bitmapHdc) to the full screen (memDC) on a memory device
@@ -38,10 +37,9 @@ void RepaintWindow(HWND hwnd, WindowState *windowState) {
       imageState->bitmap.bmWidth, imageState->bitmap.bmHeight, 
       imageState->bitmapHdc, 0, 0, imageState->bitmap.bmWidth, imageState->bitmap.bmHeight, windowState->transparentColor
     );
+    // Release shared lock
+    ReleaseSRWLockShared(&imageState->lock);
   }
-
-  // Release shared lock
-  ReleaseSRWLockShared(&windowState->lock);
 
   // Move the memDC (redrawn screen) one to one to the hdc using the boundaries of the rcPaint
   BitBlt(
@@ -82,11 +80,11 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
       // Add the state to the windowStateStack and increment the count
       windowStateStack[windowStateStackCount++] = windowState;
       // Acquire unique lock
-      AcquireSRWLockExclusive(&windowState->lock);
+      AcquireSRWLockExclusive(&windowState->initCursorPositionLock);
       // Retrieve cursor position when window is created
       GetCursorPos(windowState->initCursorPosition);
       // Release unique lock
-      ReleaseSRWLockExclusive(&windowState->lock);
+      ReleaseSRWLockExclusive(&windowState->initCursorPositionLock);
       
       break;
 
@@ -122,15 +120,16 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
         break;
       
       // Acquire shared lock
-      AcquireSRWLockShared(&windowState->lock);
+      AcquireSRWLockShared(&windowState->initCursorPositionLock);
 
       // Get difference between the current point and the last buffered point
       int diffX = abs(point.x - windowState->initCursorPosition->x);
       int diffY = abs(point.y - windowState->initCursorPosition->y);
 
+      // Unlock to prevent deadlock, as callCloseWindowLoop will enforce a unique lock
+      ReleaseSRWLockShared(&windowState->initCursorPositionLock);
+
       if (diffX > windowState->cursorPositionThreshold || diffY > windowState->cursorPositionThreshold) {
-        // Unlock to prevent deadlock, as callCloseWindowLoop will enforce a unique lock
-        ReleaseSRWLockShared(&windowState->lock);
         // Iterate over all windowStates and close them up
         for (int i = 0; i < windowStateStackCount; i++) {
           if (windowStateStack[i]) {
@@ -140,7 +139,7 @@ LRESULT CALLBACK CallEventHandler(HWND hwnd, UINT message, WPARAM wParam, LPARAM
             windowStateStack[i] = NULL;
           }
         }
-      } else ReleaseSRWLockShared(&windowState->lock);
+      }
       break;
     case WM_EXIT:
       // Destroy window states associated window, this will trigger a WM_DESTROY
