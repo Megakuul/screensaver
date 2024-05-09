@@ -72,24 +72,28 @@ typedef struct {
  * 
  * If the registry entry is not found or can't be converted to double, it returns the specified default value
 */
-double getRegDouble(HKEY root, LPCSTR sub, LPCSTR val, DWORD type, double default) {
+double getRegDouble(HKEY root, LPCWSTR sub, LPCWSTR val, DWORD type, double def) {
   HKEY key;
-  double result = default;
-  char data[255];
+  double result = def;
+  wchar_t data[255];
   DWORD dataSize = sizeof(data);
 
   // Open regkey
   if (RegOpenKeyEx(root, sub, 0, KEY_READ, &key) == ERROR_SUCCESS) {
     // Get value entry as
     if (RegGetValue(key, NULL, val, RRF_RT_ANY, &type, data, &dataSize) == ERROR_SUCCESS) {
+      
       // Convert data into a double (aka longfloat)
-      if (sscanf(data, "%lf", &result) != 1) {
-        // If conversion fails, use default value
-        result = default; 
+      wchar_t* end;
+      double convertedValue = wcstod(data, &end);
+      if (end != data) {
+        result = convertedValue;
       }
+      // If conversion fails, use default value
     }
     RegCloseKey(key);
   }
+  return result;
 }
 
 /**
@@ -207,12 +211,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     .hInstance = hInstance,
     .windowClass = L"ScreenSaverWindow",
     .initCursorPos = &initCursorPos,
-    .cursorThreshold = getRegDouble(HKEY_CURRENT_USER, "\\Software\\screensaver", "cursor_threshold", REG_SZ, 20),
-    .count = getRegDouble(HKEY_CURRENT_USER, "\\Software\\screensaver", "image_count", REG_SZ, 1),
+    .cursorThreshold = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"cursor_threshold", REG_SZ, 20),
+    .count = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_count", REG_SZ, 1),
     .interval = 1000 / 60, // Default to 60hz
-    .speed = getRegDouble(HKEY_CURRENT_USER, "\\Software\\screensaver", "image_speed", REG_SZ, 1),
-    .bounce = getRegDouble(HKEY_CURRENT_USER, "\\Software\\screensaver", "image_bounce", REG_SZ, 20),
-    .bounceScale = getRegDouble(HKEY_CURRENT_USER, "\\Software\\screensaver", "image_bounce_scale", REG_SZ, 0.7),
+    .speed = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_speed", REG_SZ, 1),
+    .bounce = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce", REG_SZ, 20),
+    .bounceScale = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce_scale", REG_SZ, 0.7),
     .bitmap = IDB_LOGOBITMAP,
     .backgroundColor = BACKGROUND_COLOR,
     .transparentColor = IDB_LOGOBITMAP_TRANSPARENT_COLOR
