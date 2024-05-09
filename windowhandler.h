@@ -29,8 +29,10 @@ typedef struct {
   double baseDecScale;
   // Bitmap metadata
   BITMAP bitmap;
-  // Bitmap handler
-  HBITMAP bitmapHandler;
+  // Bitmap handle
+  HBITMAP bitmapHandle;
+  // Old bitmap handle, this is used to unselect the bitmapHandle from the hdc on cleanup
+  HBITMAP oldBitmapHandle;
   // Bitmap device context
   HDC bitmapHdc;
 } ImageState;
@@ -41,11 +43,14 @@ typedef struct {
  * If bitmap is not found or the operation fails it returns NULL
 */
 ImageState* CreateImageState(
-  HINSTANCE instance, 
+  HINSTANCE instance,
+  RECT windowRect,
   int movement, 
   int bounceIncrement, 
-  double bounceDecrementScale, 
-  int rcBitmapId);
+  double bounceDecrementScale,
+  int imageWidth,
+  BOOL disableImageScale,
+  int imageId);
 
 /**
  * Cleans up an image state and its associated resources
@@ -109,7 +114,9 @@ WindowState* CreateWindowState(
   LPRECT monitorRect, 
   LPPOINT initCursorPos, 
   int cursorPositionThreshold,
-  int rcBitmapId,
+  double relativeImageWidth,
+  BOOL disableImageScale,
+  int imageId,
   COLORREF backgroundColor, 
   COLORREF transparentColor);
 

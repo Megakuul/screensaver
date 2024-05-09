@@ -38,6 +38,14 @@ typedef struct {
   */
   int count;
   /**
+   * Size of the images relative to the window size (1.0 == 100% of the screen)
+  */
+  double relativeImageWidth;
+  /**
+   * Disables image scale and uses the images native size (better quality)
+  */
+  BOOL disableImageScale;
+  /**
    * Default update interval in ms. This value should be set to 1000 / the displays refresh rate for optimal movement
   */
   int interval;
@@ -100,6 +108,7 @@ double getRegDouble(HKEY root, LPCWSTR sub, LPCWSTR val, DWORD type, double def)
  * Procedure leveraging a provided previewWindow to create a windowState on top of it
 */
 BOOL CreatePreviewWindow(HWND hWindow, WindowCreationRequest* request) {
+  SetWindowLongPtr(hWindow, GWLP_WNDPROC, (LONG_PTR)CallEventHandler);
   WindowState* windowState = CreateWindowState(
     request->hInstance,
     hWindow, // Specifing the preview handle will stop it from creating a new window
@@ -112,6 +121,8 @@ BOOL CreatePreviewWindow(HWND hWindow, WindowCreationRequest* request) {
     NULL, // Monitor rect is NULL, because no window must be created
     request->initCursorPos,
     request->cursorThreshold,
+    request->relativeImageWidth,
+    request->disableImageScale,
     request->bitmap,
     request->backgroundColor,
     request->transparentColor
@@ -170,11 +181,16 @@ BOOL CALLBACK CreateMonitorWindow(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
     lprcMonitor,
     request->initCursorPos,
     request->cursorThreshold,
+    request->relativeImageWidth,
+    request->disableImageScale,
     request->bitmap,
     request->backgroundColor,
     request->transparentColor
   );
   if (!windowState) return FALSE;
+
+  // Hide cursor
+  ShowCursor(FALSE);
 
   // Create windowThread running the WindowProcessLoop
   HANDLE windowThread = CreateThread(
@@ -203,6 +219,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   if (!RegisterClass(&wc)) return FALSE;
 
+  // Seed random with time
+  srand(time(NULL));
+
   // Initial cursor point
   POINT initCursorPos = { .x = 0, .y = 0 };
 
@@ -212,7 +231,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     .windowClass = L"ScreenSaverWindow",
     .initCursorPos = &initCursorPos,
     .cursorThreshold = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"cursor_threshold", REG_SZ, 20),
-    .count = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_count", REG_SZ, 1),
+    .count = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_count", REG_SZ, 2),
+    .relativeImageWidth = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_width", REG_SZ, 0.2),
+    .disableImageScale = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"disable_image_scale", REG_DWORD, FALSE),
     .interval = 1000 / 60, // Default to 60hz
     .speed = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_speed", REG_SZ, 1),
     .bounce = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce", REG_SZ, 20),
@@ -247,15 +268,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     return FALSE;
   }
 
-  // Hide cursor
-  ShowCursor(FALSE);
-
   // Start main event loop
   MSG msg;
   while (GetMessage(&msg, NULL, 0, 0)) {
     TranslateMessage(&msg);
     DispatchMessage(&msg);
   }
+
+  // If preview window was used, close its handle
+  if (hPreviewWindow) CloseHandle(hPreviewWindow);
 
   return msg.wParam;
 }

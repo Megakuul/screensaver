@@ -24,7 +24,9 @@ void ParseConsoleArgument(LPSTR arg, BOOL* s, HWND* p, BOOL* c) {
     else if (strcmp(tok, "/c") == 0) *c = TRUE;
     // If token is /p set p to the next arg by reading the next token
     else if (strcmp(tok, "/p") == 0 && (tok = strtok_s(NULL, " ", &nexttok)) != NULL) {
-      *p = FindWindowA(NULL, tok);
+      // Convert token to unsigned long and cast to window handler
+      uintptr_t hwnd = strtoull(tok, NULL, 0);
+      *p = (HWND)hwnd;
     }
     // Read next token from arg
     tok = strtok_s(NULL, " ", &nexttok); 

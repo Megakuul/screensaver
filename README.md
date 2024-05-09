@@ -64,6 +64,22 @@ The following registry keys can be used to modify the behavior of the screensave
 |--------------------|---------------|----------------------------------------------------------|
 | `cursor_threshold` | 20            | Pixel threshold for cursor movements until the screensaver exits. |
 | `image_count`      | 1             | Number of images displayed by the screensaver.           |
+| `image_width`      | 0.2           | Image width relative to the window size (1.0 == 100%)    |
+| `disable_image_scale` | 0          | If set to 1 the native image size is used (likely better quality), but the image is not scaled based on the window size |
 | `image_speed`      | 1             | Speed of the animated images in pixel per frame.         |
 | `image_bounce`     | 20            | Bounce intensity of the animated images on collision.    |
 | `image_bounce_scale` | 0.7         | Scale factor for bounce decrementation after collision.  |
+
+
+
+### Disclaimer
+---
+
+This software was built just for fun, 'cause I wanted to try to smoothly synchronizing movement updates with monitor refresh rate on `gdi32`.
+
+To provide a smooth movement animation (accurate update frequency), a spin-lock-like mechanism is used, this works quite well, but is extremely cpu intensive.
+Due to this implementation and the overall bad performance of `gdi32` the screensaver uses a notable amount of cpu power (especially when using multiple images per screen).
+
+
+If you want to build a serious implementation of a screensaver, I highly recommend using graphic engines that can leverage the gpu for rendering (e.g. `Skia`).
+(Or directly build it on top of a web-rendering engine (e.g. with `Tauri`) to abstract this all together.)
