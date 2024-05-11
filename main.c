@@ -11,7 +11,7 @@
 #define IDB_LOGOBITMAP_TRANSPARENT_COLOR RGB(255, 255, 255)
 
 // Defines background color of the screensaver
-#define BACKGROUND_COLOR RGB(95, 85, 85)
+#define BACKGROUND_COLOR RGB(34, 40, 49)
 
 /**
  * Request holding "environment" relevant data to create a window
