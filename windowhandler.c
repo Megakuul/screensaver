@@ -223,9 +223,10 @@ ImageState* CreateImageState(
   // Select scaled bitmap handle to the device context
   imageState->oldBitmapHandle = SelectObject(imageState->bitmapHdc, imageState->bitmapHandle);
 
-  // Use the halftone so that the scaled image does not look absolutely horrible
-  SetStretchBltMode(imageState->bitmapHdc, HALFTONE);
-  SetBrushOrgEx(imageState->bitmapHdc, 0, 0, NULL);  // Necessary for HALFTONE
+  // Halftone scaling can be used to create a slight blur when scaling (looks more round)
+  // however when the image background is not the same color as the window background, this does not look good
+  // SetStretchBltMode(imageState->bitmapHdc, HALFTONE);
+  // SetBrushOrgEx(imageState->bitmapHdc, 0, 0, NULL);  // Necessary for HALFTONE
 
   // Draw and scale the original image to the device context
   StretchBlt(
@@ -286,23 +287,66 @@ void insertionSort(ImageState* imageStates[], int imageStatesLength) {
   }
 }
 
+/**
+ * Algorithm to resolve the collision of two objects
+*/
 void resolveCollision(ImageState* objectA, ImageState* objectB) {
 
-  // Calculate the overlap of the two objects
-  int overlapX = (objectA->xPos + objectA->bitmap.bmWidth) - objectB->xPos;
-  int overlapY = (objectA->yPos + objectA->bitmap.bmHeight) - objectB->yPos;
+  // Retrieve minimum translation vector for x by taking the min right side - max left side
+  int overlapX = min(
+    objectA->xPos + objectA->bitmap.bmWidth, // Right side A
+    objectB->xPos + objectB->bitmap.bmWidth // Right side B
+  ) - max(
+    objectA->xPos, // Left side A
+    objectB->xPos // Left side B
+  );
 
-  // Add half of the overlap to both objects so that they are not colliding anymore
-  objectA->xPos -= (overlapX / 2) + 1;
-  objectB->xPos += (overlapX / 2) + 1;
-  objectA->yPos -= (overlapY / 2) + 1;
-  objectB->yPos += (overlapY / 2) + 1;
+  // Retrieve minimum translation vector for y by taking the min bottom side - max top side
+  int overlapY = min(
+    objectA->yPos + objectA->bitmap.bmHeight, // Bottom side A
+    objectB->yPos + objectB->bitmap.bmHeight // Bottom side B
+  ) - max(
+    objectA->yPos, // Top side A
+    objectB->yPos // Top side B
+  );
 
-  // Change movement direction
-  objectA->xMov = - objectA->xMov;
-  objectA->yMov = - objectA->yMov;
-  objectB->xMov = - objectB->xMov;
-  objectB->yMov = - objectB->yMov;
+  // Check for the smaller overlap
+  // This is very important, because we want to resolve the collision always at the minimum overlap,
+  // otherwise a 1px collision on y could cause a 10px movment on the x axis
+  if (overlapX < overlapY) {
+    // Decollide by moving the objects both by the overlapped side
+    // We check what object is at the right side to ensure that the objects don't apply the overlap to the wrong side
+    if (objectA->xPos > objectB->xPos) {
+      // ObjectA is on the right side, so we move it to the right and B to the left
+      objectA->xPos += (overlapX / 2) + 1;
+      objectB->xPos -= (overlapX / 2) + 1;
+    } else {
+      // ObjectB is on the right side, so we move it to the right and A to the left
+      objectA->xPos -= (overlapX / 2) + 1;
+      objectB->xPos += (overlapX / 2) + 1;
+    }
+    // Change movement direction
+    objectA->xMov = - objectA->xMov;
+    objectB->xMov = - objectB->xMov;
+  } else {
+    // Decollide by moving the objects both by the overlapped side
+    // We check what object is at the bottom side to ensure that the objects don't apply the overlap to the wrong side
+    if (objectA->yPos > objectB->yPos) {
+      // ObjectA is on the bottom side, so we move it to the bottom and B to the top
+      objectA->yPos += (overlapY / 2) + 1;
+      objectB->yPos -= (overlapY / 2) + 1;
+    } else {
+      // ObjectB is on the bottom side, so we move it to the bottom and A to the top
+      objectA->yPos -= (overlapY / 2) + 1;
+      objectB->yPos += (overlapY / 2) + 1;
+    }
+    // Change movement direction
+    objectA->yMov = - objectA->yMov;
+    objectB->yMov = - objectB->yMov;
+  }
+  // Add movment boost
+  objectA->inc = objectA->baseInc;
+  objectB->inc = objectB->baseInc;
 }
 
 /**
@@ -314,22 +358,33 @@ void resolveCollision(ImageState* objectA, ImageState* objectB) {
  * Algorithm is not very efficient but omits O(n^2) average speed by using the sorted list to "split" the collision detection into sections
 */
 void HandleCollisions(ImageState* imageStates[], int imageStatesLength) {
+  // Sort all images by x axis
   insertionSort(imageStates, imageStatesLength);
+  // Now iterate over all the images once
+  // Because the list is sorted we only need to iterate over every image once,
+  // checking all images after i. We know that images before i already checked the collision with i
   for (int i = 0; i < imageStatesLength; i++) {
+    // Create some abstraction aliases
     int localLeft = imageStates[i]->xPos;
     int localRight = imageStates[i]->xPos + imageStates[i]->bitmap.bmWidth;
     int localTop = imageStates[i]->yPos;
     int localBottom = imageStates[i]->yPos+imageStates[i]->bitmap.bmHeight;
 
+    // Iterate over all images and check for collision with the local image
     for (int j = i + 1; j < imageStatesLength; j++) {
+      // Create some abstraction aliases
       int remoteLeft = imageStates[j]->xPos;
       int remoteRight = imageStates[j]->xPos + imageStates[j]->bitmap.bmWidth;
       int remoteTop = imageStates[j]->yPos;
       int remoteBottom = imageStates[j]->yPos+imageStates[j]->bitmap.bmHeight;
 
+      // If the remote image left side is not colliding with the local right side
+      // the iteration can be aborted because no more remote images will collide (we know that because the list is sorted by x axis)
       if (localRight < remoteLeft) break;
 
+      // Check if y axis collides, we already know that x collides because the loop didn't break
       if (localBottom >= remoteTop && localTop <= remoteBottom) {
+        // If a collision is detected on both axes we resolve the collision
         resolveCollision(imageStates[i], imageStates[j]);
       }
     }
@@ -348,8 +403,8 @@ void UpdateImagePosition(HWND hwnd, ImageState *imageState) {
   if (!hwnd) return;
   
   // Get client rect
-  RECT clientRect;
-  GetClientRect(hwnd, &clientRect);
+  RECT windowRect;
+  GetClientRect(hwnd, &windowRect);
 
   // Acquire unique lock
   AcquireSRWLockExclusive(&imageState->lock);
@@ -375,16 +430,28 @@ void UpdateImagePosition(HWND hwnd, ImageState *imageState) {
   imageState->yPos += imageState->yMov + yInc;
 
   // Check if position in bound, if not movement is inverted
-  if (imageState->xPos + imageState->bitmap.bmWidth > clientRect.right || imageState->xPos < clientRect.left) {
+  if (imageState->xPos + imageState->bitmap.bmWidth > windowRect.right || imageState->xPos < windowRect.left) {
     imageState->inc = imageState->baseInc;
     imageState->decSteps = 1;
     imageState->xMov = - imageState->xMov;
+
+    // Check if image is out of boundaries and if yes correct it to the border of the window
+    if (imageState->xPos + imageState->bitmap.bmWidth > windowRect.right)
+      imageState->xPos = windowRect.right - imageState->bitmap.bmWidth;
+    else if (imageState->xPos < windowRect.left)
+      imageState->xPos = windowRect.left;
   }
   // Check if position in bound, if not movement is inverted
-  if (imageState->yPos + imageState->bitmap.bmHeight > clientRect.bottom || imageState->yPos < clientRect.top) {
+  if (imageState->yPos + imageState->bitmap.bmHeight > windowRect.bottom || imageState->yPos < windowRect.top) {
     imageState->inc = imageState->baseInc;
     imageState->decSteps = 1;
     imageState->yMov = - imageState->yMov;
+
+    // Check if image is out of boundaries and if yes correct it to the border of the window
+    if (imageState->yPos + imageState->bitmap.bmHeight > windowRect.bottom)
+      imageState->yPos = windowRect.bottom - imageState->bitmap.bmHeight;
+    else if (imageState->yPos < windowRect.top)
+      imageState->yPos = windowRect.top;
   }
 
   // Release unique lock

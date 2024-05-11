@@ -11,7 +11,7 @@
 #define IDB_LOGOBITMAP_TRANSPARENT_COLOR RGB(255, 255, 255)
 
 // Defines background color of the screensaver
-#define BACKGROUND_COLOR RGB(240, 240, 240)
+#define BACKGROUND_COLOR RGB(95, 85, 85)
 
 /**
  * Request holding "environment" relevant data to create a window
@@ -236,8 +236,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     .disableImageScale = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"disable_image_scale", REG_DWORD, FALSE),
     .interval = 1000 / 60, // Default to 60hz
     .speed = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_speed", REG_SZ, 1),
-    .bounce = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce", REG_SZ, 20),
-    .bounceScale = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce_scale", REG_SZ, 0.7),
+    .bounce = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce", REG_SZ, 10),
+    .bounceScale = getRegDouble(HKEY_CURRENT_USER, L"Software\\screensaver", L"image_bounce_scale", REG_SZ, 0.01),
     .bitmap = IDB_LOGOBITMAP,
     .backgroundColor = BACKGROUND_COLOR,
     .transparentColor = IDB_LOGOBITMAP_TRANSPARENT_COLOR
